@@ -7,7 +7,7 @@
   'use strict';
   var esc = PW.esc;
   var $ = function (id) { return document.getElementById(id); };
-  var TABS = ['compose', 'week', 'd1', 'd3'];
+  var TABS = ['compose', 'week', 'd1', 'd3', 'dash'];
   var state = { data: null, editing: null, img: null, removeImage: false, armed: null, queuePlan: '', composeBuilt: false };
 
   // ------------------------------------------------------------ frame
@@ -23,6 +23,8 @@
     Array.prototype.forEach.call($('tabs').querySelectorAll('a'), function (a) {
       a.className = a.getAttribute('data-tab') === tab ? 'on' : '';
     });
+    // The dashboard has its own call, made the first time its tab opens (dashboard.js).
+    if (tab === 'dash' && window.PW_DASHBOARD) window.PW_DASHBOARD.show();
   }
 
   function showError(err) {
