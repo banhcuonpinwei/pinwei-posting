@@ -28,6 +28,7 @@
   function showError(err) {
     if (err && err.auth) {
       $('error').innerHTML = PW.noKeyHtml();
+      if (!state.data) $('t-compose').innerHTML = '';
       return;
     }
     $('error').innerHTML = '<p class="note bad">' + esc(err && err.message || err) + ' <a href="#" id="retry">Try again</a></p>';
