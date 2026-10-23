@@ -282,12 +282,12 @@
   // ------------------------------------------------------------ Groups this week
 
   var QUEUE_PAGE = 10;
-  var queue = { page: 0, search: '', open: '', texts: {}, done: {}, showDone: false, manage: false };
+  var queue = { page: 0, search: '', editing: false, draft: '', done: {}, showDone: false, manage: false };
 
   function openQueue(planId) {
     state.queuePlan = planId;
     queue.page = 0;
-    queue.open = '';
+    queue.editing = false;
     location.hash = '#week';
     loadQueue();
   }
@@ -298,10 +298,6 @@
       state.data.queue = r.data;
       renderWeek();
     }, showError);
-  }
-
-  function groupText(g) {
-    return g.group_id in queue.texts ? queue.texts[g.group_id] : g.text;
   }
 
   /** The groups shown: search, then the ones not saved yet (unless Show done), then the page. */
@@ -339,30 +335,28 @@
     }
     out.push('<p class="qsum"><b>' + (q.groups.length - doneCount) + '</b> of ' + q.groups.length + ' groups left this week' +
       (doneCount ? ' · ' + doneCount + ' saved <a href="#" id="qdone">' + (queue.showDone ? 'hide them' : 'show them') + '</a>' : '') +
-      (q.photo_url ? ' · <a href="' + esc(q.photo_url) + '" target="_blank" rel="noopener">Download photo</a>' : '') +
-      ' · <span class="muted">Change a few words for each group: the same text everywhere looks like spam.</span></p>');
+      (q.photo_url ? ' · <a href="' + esc(q.photo_url) + '" target="_blank" rel="noopener">Download photo</a>' : '') + '</p>');
+    out.push(queue.editing
+      ? '<div class="card qtext"><label for="qtxt">Text for every group</label><textarea id="qtxt" rows="6">' + esc(queue.draft) + '</textarea>' +
+        '<div class="row"><button type="button" id="qtsave">Save text</button><button type="button" class="alt" id="qtcancel">Cancel</button>' +
+        '<span class="small" id="qtmsg"></span></div></div>'
+      : '<div class="card qtext"><div class="qtext-line"><b>Text for every group</b><span class="qtext-preview muted">' +
+        (q.text ? esc(q.text.replace(/\s+/g, ' ')) : 'No text yet.') + '</span><button type="button" class="link-btn" id="qtedit">Edit text</button></div></div>');
     if (!shown.length) {
       out.push('<p class="note ok">' + (queue.search ? 'No group matches.' : 'All groups for this post are done.') + '</p>');
     } else {
       out.push('<table class="list qtable"><tbody>' + shown.map(function (g) {
         var i = q.groups.indexOf(g);
-        var own = g.group_id in queue.texts;
         var done = !!queue.done[g.group_id];
-        var row = '<tr data-i="' + i + '" class="' + (done ? 'done' : '') + '">' +
+        return '<tr data-i="' + i + '" class="' + (done ? 'done' : '') + '">' +
           '<td class="qg"><a href="' + esc(g.url) + '" target="_blank" rel="noopener">' + esc(g.name) + '</a>' +
           (g.unclear ? ' <span class="tag">Unclear</span>' : '') +
           '<div class="muted small">' + PW.members(g.members) + ' members · last post ' + esc(g.last_ago) + ' · ' + g.posted + '/' + g.max + ' this week</div></td>' +
-          '<td class="qt"><button type="button" class="link-btn edit">' + (queue.open === g.group_id ? 'Close text' : own ? 'Edit text (changed)' : 'Edit text') + '</button></td>' +
           '<td class="qa"><button type="button" class="copy"' + (done ? ' disabled' : '') + '>Copy &amp; open</button></td>' +
           '<td class="qs"><input type="url" class="link" placeholder="Post link (optional)"' + (done ? ' disabled' : '') + '>' +
           '<select class="st"' + (done ? ' disabled' : '') + '><option>Posted</option><option>Pending approval</option></select>' +
           '<button type="button" class="save"' + (done ? ' disabled' : '') + '>' + (done ? 'Saved' : 'Save') + '</button></td>' +
           '<td class="qx"><button type="button" class="link-btn remove" title="Stop posting in this group (turn it off)">Remove</button></td></tr>';
-        if (queue.open === g.group_id) {
-          row += '<tr class="qedit" data-i="' + i + '"><td colspan="5"><textarea class="txt" rows="5">' + esc(groupText(g)) + '</textarea>' +
-            '<div class="row"><button type="button" class="alt reset">Use the post text</button><span class="muted small">Changes are kept for this group when you Save.</span></div></td></tr>';
-        }
-        return row;
       }).join('') + '</tbody></table>');
       out.push('<div class="msgline small" id="qmsg"></div>');
       if (pages > 1) {
@@ -379,7 +373,13 @@
   function bindWeekTop(q) {
     PW.remember('pw_posted_by', $('qwho'));
     Array.prototype.forEach.call($('t-week').querySelectorAll('a[data-plan]'), function (a) {
-      a.addEventListener('click', function (ev) { ev.preventDefault(); state.queuePlan = a.getAttribute('data-plan'); queue.page = 0; loadQueue(); });
+      a.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        state.queuePlan = a.getAttribute('data-plan');
+        queue.page = 0;
+        queue.editing = false;
+        loadQueue();
+      });
     });
     $('qsearch').addEventListener('input', function () {
       queue.search = this.value;
@@ -390,6 +390,7 @@
       $('qsearch').setSelectionRange(pos, pos);
     });
     $('qmanage').addEventListener('click', function () { queue.manage = true; renderManage(); });
+    bindQueueText(q);
     if ($('qdone')) $('qdone').addEventListener('click', function (ev) { ev.preventDefault(); queue.showDone = !queue.showDone; renderWeek(); });
     if ($('qprev')) $('qprev').addEventListener('click', function () { queue.page--; renderWeek(); });
     if ($('qnext')) $('qnext').addEventListener('click', function () { queue.page++; renderWeek(); });
@@ -402,24 +403,50 @@
     m.innerHTML = text;
   }
 
-  function bindWeekRows(q) {
-    Array.prototype.forEach.call($('t-week').querySelectorAll('tr.qedit'), function (tr) {
-      var g = q.groups[Number(tr.getAttribute('data-i'))];
-      tr.querySelector('.txt').addEventListener('input', function () { queue.texts[g.group_id] = this.value; });
-      tr.querySelector('.reset').addEventListener('click', function () { delete queue.texts[g.group_id]; renderWeek(); });
-    });
-    Array.prototype.forEach.call($('t-week').querySelectorAll('tr[data-i]:not(.qedit)'), function (tr) {
-      var g = q.groups[Number(tr.getAttribute('data-i'))];
-      tr.querySelector('.edit').addEventListener('click', function () {
-        queue.open = queue.open === g.group_id ? '' : g.group_id;
+  /** The one text every group gets: shown on one line, edited in place, saved for everyone. */
+  function bindQueueText(q) {
+    if ($('qtedit')) {
+      $('qtedit').addEventListener('click', function () {
+        queue.editing = true;
+        queue.draft = q.text;
         renderWeek();
+        $('qtxt').focus();
       });
+      return;
+    }
+    if (!$('qtxt')) return;
+    $('qtxt').addEventListener('input', function () { queue.draft = this.value; });
+    $('qtcancel').addEventListener('click', function () { queue.editing = false; renderWeek(); });
+    $('qtsave').addEventListener('click', function () {
+      var b = this;
+      var m = $('qtmsg');
+      b.disabled = true;
+      m.className = 'small';
+      m.textContent = 'Saving…';
+      PW.api('queueText', { plan_id: q.plan_id, text: queue.draft }).then(function (r) {
+        q.text = r.data.text;
+        q.draft_id = r.data.draft_id;
+        queue.editing = false;
+        renderWeek();
+        qmsg(esc(r.data.message), 'okc');
+      }, function (err) {
+        b.disabled = false;
+        m.className = 'small badc';
+        m.textContent = 'Not saved: ' + err.message;
+      });
+    });
+  }
+
+  function bindWeekRows(q) {
+    Array.prototype.forEach.call($('t-week').querySelectorAll('tr[data-i]'), function (tr) {
+      var g = q.groups[Number(tr.getAttribute('data-i'))];
       tr.querySelector('.copy').addEventListener('click', function () {
-        var t = groupText(g);
-        if (!t.trim()) return qmsg('Write the text first (Edit text).', 'badc');
+        if (queue.editing) return qmsg('Save the text first (Save text above the list).', 'badc');
+        var t = q.text;
+        if (!t.trim()) return qmsg('Write the text first (Edit text above the list).', 'badc');
         PW.copy(t, function (ok) {
           qmsg(ok ? 'Copied the text for <b>' + esc(g.name) + '</b>. In the group: click the post box, Ctrl+V, add the photo, post. Then Save here.'
-            : 'Could not copy: open Edit text, select it and press Ctrl+C.', ok ? 'okc' : 'badc');
+            : 'Could not copy: click Edit text above the list, select the text and press Ctrl+C.', ok ? 'okc' : 'badc');
         });
         window.open(g.url, '_blank', 'noopener');
       });
@@ -430,11 +457,10 @@
         b.disabled = true;
         b.textContent = 'Saving…';
         PW.api('queueSave', {
-          group_id: g.group_id, plan_id: q.plan_id, draft_id: g.draft_id, url: tr.querySelector('.link').value,
-          status: tr.querySelector('.st').value, posted_by: who, text: groupText(g),
+          group_id: g.group_id, plan_id: q.plan_id, draft_id: q.draft_id, url: tr.querySelector('.link').value,
+          status: tr.querySelector('.st').value, posted_by: who, text: q.text,
         }).then(function (r) {
           queue.done[g.group_id] = true;
-          if (queue.open === g.group_id) queue.open = '';
           renderWeek();
           qmsg(esc(g.name) + ': ' + esc(r.data.message), 'okc');
         }, function (err) {
